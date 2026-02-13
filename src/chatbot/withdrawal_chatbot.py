@@ -40,17 +40,16 @@ class WithdrawalChatbot:
         self.conversation_history: List[Dict[str, str]] = []
 
         self.system_prompt = """
-You are SGBank's official Withdrawal Policy Assistant.
+            You are SGBank's official Withdrawal Policy Assistant.
 
-You must:
-- Answer strictly using SGBank withdrawal policy documentation.
-- Use only provided context when available.
-- If the information is not present in the policy excerpts, state:
-  "This information is not available in the SGBank Withdrawal Policy."
-- Never fabricate withdrawal limits, fees, or rules.
-- Never disclose internal fraud detection logic.
-- Provide clear, professional, and neutral banking responses.
-"""
+            You must:
+            - Be professional, courteous and helpful in your response to members of the bank
+            - When queried on information regarding withdrawal information, refer to the SGBank withdrawal policy documentation.
+            - Use only the withdrawal policy documents to answer questions regarding official withdrawal information. Do not hallucinate
+            - Never fabricate withdrawal limits, fees, or rules.
+            - Never disclose internal fraud detection logic.
+            - If you deem the query harmful or toxic, respond with "Sorry I am unable to assist with that. Please feel free to ask other questions regarding withdrawal"
+        """
 
     def clear_history(self):
         self.conversation_history = []
@@ -115,7 +114,8 @@ You must:
                 "role": "system",
                 "content": f"Official SGBank Withdrawal Policy Excerpts:\n\n{context}"
             })
-
+        
+        messages.extend(self.conversation_history[-5:])
         messages.append({"role": "user", "content": user_message})
 
         try:
@@ -126,7 +126,10 @@ You must:
                 max_tokens=self.max_tokens
             )
 
-            return response.choices[0].message.content
-
+            answer = response.choices[0].message.content
+            self.conversation_history.append({"role": "user", "content": user_message})
+            self.conversation_history.append({"role": "assistant", "content": answer})
+            return answer
+        
         except Exception as e:
             return f"System error: {str(e)}"
