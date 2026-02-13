@@ -1,5 +1,6 @@
 """Chatbot module with RAG capabilities"""
 
-from .chatbot import Chatbot
+from .withdrawal_chatbot import WithdrawalChatbot
+
 
 __all__ = ['Chatbot']
