@@ -209,6 +209,10 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
+@app.route('/health')
+def health():
+    return {"status": "ok"}, 200
+
 
 # ===================================
 # Chat Routes (Protected)
