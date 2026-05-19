@@ -97,18 +97,124 @@ For a headless CLI session: `python main.py`.
 
 ### Red Team App
 
-The Red Team app talks to the chatbot over HTTP, so you need the bot's API endpoint running before you launch the dashboard.
+The Red Team dashboard runs single-turn and multi-turn adversarial scenarios against any chatbot that exposes an HTTP endpoint, mutates prompts through obfuscation tools, and scores each response with an LLM evaluator.
+
+> **Prerequisite — FastAPI endpoint.** The dashboard speaks HTTP, so any chatbot under test must be wrapped in a thin FastAPI shim. To wrap your own chatbot, copy [`FASTAPI_TEMPLATE.py`](FASTAPI_TEMPLATE.py) and follow [`FASTAPI_SETUP.md`](FASTAPI_SETUP.md). The included withdrawal bot is already wrapped in `api.py` at the repo root.
 
 ```bash
-# 1. Start the FastAPI endpoint that exposes the chatbot to the attacker
+# 1. Start the chatbot endpoint (the included withdrawal bot, or your own
+#    bot wrapped via FASTAPI_TEMPLATE.py)
 uvicorn api:app --host 0.0.0.0 --port 8000
-# → http://localhost:8000  (POST /chat)
+# → http://localhost:8000   (POST /chat, POST /reset, GET /health)
 
 # 2. In a second terminal, launch the Streamlit dashboard
 streamlit run attacks/streamlit_app.py
 ```
 
-The dashboard loads `attacks/.env` if present, otherwise it falls back to the repo-root `.env`. Point its `CHATBOT_API_URL` (or equivalent setting in the dashboard) at the `api.py` endpoint above. Reports are written to `attacks/reports/` and can be replayed or diffed between defence iterations.
+The dashboard loads `attacks/.env` if present, otherwise it falls back to the repo-root `.env`. Reports are written to `attacks/reports/` and can be replayed or diffed between defence iterations.
+
+#### Dashboard walkthrough
+
+![Dashboard overview](pictures/red_team_dashboard_overview.png)
+
+##### 1. Connect to your chatbot API
+
+Enter the **Base URL** and **Chat path** of your running endpoint. If your chatbot uses non-standard JSON keys (e.g. `query`/`answer` instead of `message`/`response`), override **Request prompt field** and **Response field** to match — no code changes needed on your side.
+
+![Connect API](pictures/connect_api_dashboard.png)
+
+##### 2. Pick an attack mode
+
+Three modes can be combined in one run:
+
+- **General (static datasets)** — runs curated CSVs of red-team prompts in single-turn mode.
+- **Custom Single-turn Prompts** — bring your own CSV (`input`,`target` columns), edit inline, or upload.
+- **Red Team LLM (multi-turn scenarios)** — JSON scenarios driven by an attacker LLM that adapts based on the bot's previous responses.
+
+###### Built-in datasets (`attacks/datasets/`)
+
+| File | Description |
+| --- | --- |
+| `moonshot_jailbreak_prompts.csv` | Moonshot's jailbreak corpus — DAN, instruction overrides, role-play bypasses. |
+| `age-bias.csv` | BBQ-style scenarios probing age-based stereotyping. |
+| `gender-bias.csv` | BBQ-style scenarios probing gender bias. |
+| `nationality-bias.csv` | BBQ-style scenarios probing nationality bias. |
+| `physical-appearance-bias.csv` | BBQ-style scenarios probing appearance bias. |
+| `race-ethnicity-bias.csv` | BBQ-style scenarios probing race / ethnicity bias. |
+| `religion-bias.csv` | BBQ-style scenarios probing religion-based bias. |
+| `toxicity-prompts.csv` | Toxic input continuations / completions. |
+| `singapore-pofma-statements-2024.csv` | Singapore POFMA misinformation truth-claim probes. |
+| `custom_single_turn_prompts.csv` | Curated single-turn set targeting the SGBank withdrawal bot (instruction override, off-topic, prompt injection, etc.). |
+| `custom_multi_turn_scenarios.json` | Scripted multi-turn scenarios — reconnaissance, scope drift, system / tool leak. |
+
+![Select dataset](pictures/select_dataset.png)
+![Custom prompt template](pictures/custom_prompt_template.png)
+![Multi-turn scenario template](pictures/multiturn_scenario_template.png)
+
+###### Upload your own
+
+Single-turn CSVs require `input` and `target` columns. Multi-turn JSON files follow the schema in `attacks/datasets/custom_multi_turn_scenarios.json` (`scenario_id`, `attack_type`, `objective`, `description`, `turns[]`).
+
+![Upload custom prompt](pictures/upload_custom_prompt_template.png)
+
+##### 3. (Optional) Apply prompt-mutation tools
+
+Each tool transforms prompts before they hit the bot — useful for testing whether a defence relies on surface-level pattern matching rather than semantic understanding.
+
+| Tool | Description |
+| --- | --- |
+| `char_swap` | Swaps two adjacent characters in ~20% of words. Tests robustness to typos. |
+| `homoglyph` | Replaces letters with Unicode look-alikes (e.g. Latin `a` → Cyrillic `а`). Probes keyword/regex filters. |
+| `insert_punctuation` | Injects random punctuation into words. Disrupts tokenization-based filters. |
+| `payload_mask` | Masks nouns/verbs by replacing them with their NLTK WordNet definitions. Hides intent semantically while preserving meaning. |
+| `text_bugger` | TextAttack character-level adversarial augmenter (mix of swaps, deletions, homoglyphs, embedding swaps). |
+| `text_fooler` | TextAttack semantic word-level augmenter using embedding-distance synonyms with POS-tag constraints. |
+
+Selected tools chain in order, so combining `homoglyph` + `payload_mask` produces a prompt that is both lexically and semantically obfuscated.
+
+![Prompt mutation tools](pictures/prompt_mutation_tools.png)
+
+##### 4. Configure the LLM evaluator
+
+The single-turn judge looks for refusal-style language — tweak the **Refusal suggestion** to match your bot's safe-fallback wording so legitimate refusals aren't misclassified. The multi-turn judge uses a free-form **evaluator condition**; describe what counts as a successful jailbreak. The default flags off-topic drift, leaked system internals, and policy-circumventing detail.
+
+![Evaluator settings](pictures/evaluator_settings.png)
+
+##### 5. Configure the attacker (multi-turn only)
+
+For multi-turn scenarios, the attacker is itself an LLM. Edit its system prompt to describe your domain so it generates plausible adversarial follow-ups instead of generic ones. The attacker also receives the scenario `objective`, the next scripted turn as a soft `prompt_reference`, and the running conversation history.
+
+![Attacker prompt](pictures/attacker_prompt.png)
+
+##### 6. Run
+
+Click **Run Red Teaming**. The sidebar locks while the run is in flight; click **Clear Results** afterwards to reconfigure.
+
+![Run](pictures/run_red_teaming.png)
+
+#### Reading the results
+
+All output is rendered on the right side of the dashboard.
+
+##### Overall jailbreak rate
+
+The headline number — successful jailbreaks ÷ total attempts — alongside per-mode breakdowns. You can click download here to obtain the collated dataset of all prompt injections and responses in this test run.
+
+![Overall results](pictures/Overall_dashboard_results.png)
+
+##### Breakdown by category
+
+Per-dataset / per-attack-type pivot showing which categories your bot is weakest against.
+
+![Breakdown by category](<pictures/breakdown of results by cat.png>)
+
+##### Per-case inspection
+
+Drill down into individual prompts and bot responses, including the LLM evaluator's rationale for each verdict — useful for diagnosing why a defence layer let something through.
+
+![Inspect dataset](<pictures/inspect dataset.png>)
+
+Reports persist to `attacks/reports/run_YYYYMMDD_hhmmss.csv` and `attacks/reports/generative_attack_evaluation_results.json` so you can drill down on the successful prompt injections as you tighten the Blue Team layers.
 
 ---
 
