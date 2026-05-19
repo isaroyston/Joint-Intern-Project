@@ -14,7 +14,7 @@ Contents
 - `landetect_guard.py` — language / non-English input gate
 - `output_guard.py` — output-checker prompt + parser utilities
 
-***Installation***
+## Installation
 
 Install runtime dependencies in your project:
 
@@ -28,7 +28,7 @@ Optional packages (only required for additional features):
 pip install langdetect langchain-core
 ```
 
-***Sentinel — Setup & Use***
+## Sentinel — Setup & Use
 
 Purpose
 - Server-side guardrail validation using Sentinel's policy engine. Detects off-topic, prompt-injection, system-prompt leakage, and other defined rules.
@@ -71,7 +71,7 @@ async def main():
 asyncio.run(main())
 ```
 
-***LangDetect Guard — Setup & Use***
+## LangDetect Guard — Setup & Use
 
 Purpose
 - Fast character-based rejection of non-ASCII/mixed-script input, with an optional `langdetect`-based second stage (if installed) for higher confidence.
@@ -105,24 +105,45 @@ if guard.block_non_english(user_text, enforce_langdetect=True):
     pass
 ```
 
-***Output Guard — Setup & Use***
+## Output Guard — Setup & Use
 
 Purpose
-- Provide the output-checker system prompt and utilities to normalize the LLM checker response into `{state, answer, reason}`.
+- Drop-in output safety checker. Sits after your LLM call, before you return to the user. Validates and can request regeneration if the output violates safety rules.
 
 Usage options
-- Use `OutputGuard.check_with_langchain_llm(output_llm, ...)` when you have a LangChain-style ChatModel.
-- Use `OutputGuard.check_with_invoke(...)` with a simple `invoke(system_prompt, payload)` callable.
+- Configure rules, topics, and model provider/API key at startup. 
+- Use `guard.check(user_message, draft_answer, generate_fn)` to evaluate the draft. Use `generate_fn` to allow the guard to instruct your own LLM to regenerate on failure, or omit it to have the guard attempt a rewrite.
 
-Example (LangChain ChatModel style):
+Example:
 
 ```python
 from blue_team_modules.output_guard import OutputGuard
 
-guard = OutputGuard()
-# output_llm is a ChatModel-like instance with .invoke(messages)
-verdict = guard.check_with_langchain_llm(output_llm, user_message, draft_answer, retry_count=0)
-print(verdict)
+guard = OutputGuard(
+    domain_name="CPF Board internal usage",
+    domain_scope="withdrawal policies, account information",
+    off_topic_examples=["How's the weather today?"],
+    safety_rules=["Toxic content: Do not engage with hostile messages."],
+    trusted_tools=[],
+    blocked_message="I'm sorry, I cannot assist with that.",
+    api_key="YOUR_GUARD_KEY",
+    provider="openai",
+    model="gpt-4o",
+)
+
+# Example generating function (to pass optional hint)
+def generate(user_msg, hint=None):
+    # Your LLM call logic
+    return "Some draft answer"
+    
+result = guard.check(
+    user_message="What is my withdrawal limit?",
+    draft_answer=generate("What is my withdrawal limit?"),
+    generate_fn=generate,
+)
+
+print(result["answer"])     # Safe answer
+print(result["blocked"])    # True if blocked/filtered
 ```
 
 5) Plugging everything into your app
@@ -150,8 +171,8 @@ def handle_user_message(user_text):
 
     # generate draft answer with your LLM, then run output guard
     # draft_answer = llm_generate(user_text)
-    # output_guard = OutputGuard()
-    # verdict = output_guard.check_with_langchain_llm(output_llm, user_text, draft_answer, retry_count=0)
+    # guard = OutputGuard(domain_name="...", api_key="...", ...) # typically configured globally
+    # verdict = guard.check(user_message=user_text, draft_answer=draft_answer, generate_fn=llm_generate)
 
     return "OK to proceed"
 ```
