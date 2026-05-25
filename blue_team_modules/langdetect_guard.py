@@ -64,6 +64,9 @@ class LanguageDetectGuard:
         if not enforce_langdetect:
             return False
 
+        # Stage 2 language detection is optional. If langdetect is unavailable,
+        # fall back to the character whitelist only.
+        # From this point langdetect package is required.
         if detect_langs is None:
             return False
 
