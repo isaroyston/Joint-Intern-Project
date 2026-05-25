@@ -30,6 +30,8 @@ pip install langdetect langchain-core
 
 ## Sentinel — Setup & Use
 
+Documentation: [Sentinel Overview](https://www.aiguardian.gov.sg/docs/wiki/Sentinel-Overview)
+
 Purpose
 - Server-side guardrail validation using Sentinel's policy engine. Detects off-topic, prompt-injection, system-prompt leakage, and other defined rules.
 
@@ -54,7 +56,7 @@ $body = @{ text = "hello"; guardrails = @{ "lionguard-2-binary" = @{} } } | Conv
 Invoke-RestMethod -Uri "https://sentinel.stg.aiguardian.gov.sg/api/v1/validate" -Method Post -Headers $headers -Body $body
 ```
 
-Basic (Exaample) usage (async):
+Basic (Example) usage (async):
 
 ```python
 import asyncio
@@ -87,7 +89,7 @@ Usage examples:
 1) One-line helper (convenience):
 
 ```python
-from blue_team_modules.landetect_guard import block_non_english
+from blue_team_modules.langdetect_guard import block_non_english
 
 if block_non_english(user_text):
     # ask user to rephrase in English or reject
@@ -97,7 +99,7 @@ if block_non_english(user_text):
 2) Custom guard instance (tunable):
 
 ```python
-from blue_team_modules.landetect_guard import LanguageDetectGuard
+from blue_team_modules.langdetect_guard import LanguageDetectGuard
 
 guard = LanguageDetectGuard(min_chars_for_lang_check=40, min_english_prob=0.9)
 if guard.block_non_english(user_text, enforce_langdetect=True):
