@@ -97,14 +97,18 @@ class OutputGuard:
     api_key: str
 
     # --- Optional: sensible defaults ---
-    provider: str = "openai"                    # "anthropic" or "openai"
+    provider: str = "openai"
     model: str = "gpt-4o"
     address_user_as: str = "Dear Customer"
     currency: str = "SGD"
     language: str = "English"
     max_retries: int = 1
-    temperature: float = 0.0
+    temperature: float = 1.0
     blocked_message: str = "I'm sorry, I cannot assist with that request."
+
+    # --- NEW: Azure-specific fields ---
+    azure_endpoint: Optional[str] = None
+    azure_api_version: str = "2024-12-01-preview"
 
     def __post_init__(self):
         if self.provider == "anthropic":
@@ -113,14 +117,32 @@ class OutputGuard:
                 self._client = anthropic.Anthropic(api_key=self.api_key)
             except ImportError:
                 raise ImportError("Run: pip install anthropic")
+
         elif self.provider == "openai":
             try:
                 from openai import OpenAI
                 self._client = OpenAI(api_key=self.api_key)
             except ImportError:
                 raise ImportError("Run: pip install openai")
+
+        # Azure branch
+        elif self.provider == "azure":
+            if not self.azure_endpoint:
+                raise ValueError("azure_endpoint is required when provider='azure'")
+            try:
+                import os
+                from openai import AzureOpenAI
+                os.environ["NO_PROXY"] = "gencentral.cpfnet.gov.sg"  # direct assignment, not setdefault
+                self._client = AzureOpenAI(
+                    azure_endpoint=self.azure_endpoint,
+                    api_key=self.api_key,
+                    api_version=self.azure_api_version,
+                )
+            except ImportError:
+                raise ImportError("Run: pip install openai")
+
         else:
-            raise ValueError(f"Unsupported provider '{self.provider}'. Use 'anthropic' or 'openai'.")
+            raise ValueError(f"Unsupported provider '{self.provider}'. Use 'anthropic', 'openai', or 'azure'.")
 
     # ------------------------------------------------------------------
     # Public

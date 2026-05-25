@@ -8,22 +8,44 @@ Expected env vars in `.env`:
 - SENTINEL_API_KEY
 - SENTINEL_API_URL
 - OPENAI_API_KEY
+- AZURE_OPENAI_ENDPOINT
+- AZURE_OPENAI_API_VERSION  (optional, defaults to 2024-12-01-preview)
+- AZURE_OPENAI_MODEL        (optional, defaults to gpt-5-mini)
 """
-
-import asyncio
 import os
+# UPDATED: added Sentinel host alongside Azure so both bypass the proxy
+os.environ["NO_PROXY"] = "gencentral.cpfnet.gov.sg,sentinel.stg.aiguardian.gov.sg"
+
+from openai import AzureOpenAI
+import asyncio
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+def load_local_env(env_path: Path) -> None:
+    """Minimal .env loader without python-dotenv."""
+    if not env_path.exists():
+        print(f"  WARNING: .env file not found at {env_path}")
+        return
+
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from blue_team_modules.landetect_guard import LanguageDetectGuard
-from blue_team_modules.output_guard import OutputGuard
-from blue_team_modules.sentinel import SentinelGuard
+from langdetect_guard import LanguageDetectGuard
+from output_guard import OutputGuard
+# UPDATED: import from sentinel1 instead of sentinel
+from sentinel import SentinelGuard
 
 
 def check_langdetect() -> bool:
@@ -36,7 +58,6 @@ def check_langdetect() -> bool:
     ]
 
     passed = True
-
     for text, expected_blocked in samples:
         blocked = guard.block_non_english(text, enforce_langdetect=True)
         status = "PASS" if blocked == expected_blocked else "FAIL"
@@ -64,7 +85,13 @@ async def check_sentinel() -> bool:
         print("  SKIP: SENTINEL_API_KEY is missing in .env")
         return False
 
-    guard = SentinelGuard(api_key=api_key, url=api_url)
+    # UPDATED: no_proxy_hosts is passed explicitly so sentinel.py builds the
+    # correct httpx mounts even if SENTINEL_API_URL is overridden via .env
+    guard = SentinelGuard(
+        api_key=api_key,
+        url=api_url,
+        no_proxy_hosts=["sentinel.stg.aiguardian.gov.sg"],
+    )
     result = await guard.validate(text="hello, this is a harmless connectivity test")
 
     if result.error:
@@ -86,6 +113,14 @@ def check_output_guard() -> bool:
         print("  SKIP: OPENAI_API_KEY is missing in .env")
         return False
 
+    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+    model = os.getenv("AZURE_OPENAI_MODEL", os.getenv("RED_TEAM_EVAL_MODEL", "gpt-5-mini"))
+
+    if not azure_endpoint:
+        print("  SKIP: AZURE_OPENAI_ENDPOINT is missing in .env")
+        return False
+
     guard = OutputGuard(
         domain_name="policy chatbot",
         domain_scope="policy answers, chatbot responses, and safety checks",
@@ -97,8 +132,10 @@ def check_output_guard() -> bool:
         trusted_tools=[],
         blocked_message="I'm sorry, I cannot assist with that request.",
         api_key=api_key,
-        provider="openai",
-        model=os.getenv("RED_TEAM_EVAL_MODEL", "gpt-4o-mini"),
+        provider="azure",
+        azure_endpoint=azure_endpoint,
+        azure_api_version=azure_api_version,
+        model=model,
     )
 
     result = guard.check(
@@ -117,7 +154,7 @@ def check_output_guard() -> bool:
 
 
 async def main() -> int:
-    load_dotenv()
+    load_local_env(PROJECT_ROOT / ".env")
 
     langdetect_ok = check_langdetect()
     sentinel_ok = await check_sentinel()
@@ -125,7 +162,7 @@ async def main() -> int:
 
     print("\nSummary:")
     print(f"  langdetect: {'OK' if langdetect_ok else 'FAILED'}")
-    print(f"  sentinel: {'OK' if sentinel_ok else 'FAILED'}")
+    print(f"  sentinel:   {'OK' if sentinel_ok else 'FAILED'}")
     print(f"  output_guard: {'OK' if output_guard_ok else 'FAILED'}")
 
     return 0 if langdetect_ok and sentinel_ok and output_guard_ok else 1
@@ -133,3 +170,4 @@ async def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(asyncio.run(main()))
+
